@@ -1,0 +1,306 @@
+name: Deploy Jaguar AGI to Production
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'jaguar-local/**'
+      - '.github/workflows/deploy-production.yml'
+  pull_request:
+    branches: [ main ]
+    types: [ closed ]
+    paths:
+      - 'jaguar-local/**'
+
+env:
+  DROPLET_ID: "504791828"
+  DEPLOY_PATH: "/opt/jaguar-agi"
+  DOCKER_COMPOSE_FILE: "docker-compose.prod.yml"
+
+jobs:
+  deploy:
+    name: Deploy to Digital Ocean
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || (github.event.pull_request.merged == true)
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Setup Digital Ocean CLI
+      uses: digitalocean/action-doctl@v2
+      with:
+        token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+    - name: Verify droplet exists
+      run: |
+        echo "🔍 Verifying droplet ${{ env.DROPLET_ID }} exists..."
+        doctl compute droplet get ${{ env.DROPLET_ID }} --format ID,Name,Status,PublicIPv4
+        
+        # Get droplet IP
+        DROPLET_IP=$(doctl compute droplet get ${{ env.DROPLET_ID }} --format PublicIPv4 --no-header)
+        echo "DROPLET_IP=$DROPLET_IP" >> $GITHUB_ENV
+        echo "✅ Droplet IP: $DROPLET_IP"
+
+    - name: Setup SSH
+      run: |
+        echo "🔑 Setting up SSH connection..."
+        mkdir -p ~/.ssh
+        echo "${{ secrets.DROPLET_SSH_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        
+        # Add droplet to known hosts
+        ssh-keyscan -H ${{ env.DROPLET_IP }} >> ~/.ssh/known_hosts
+        
+        # Test SSH connection
+        ssh -o ConnectTimeout=10 root@${{ env.DROPLET_IP }} "echo 'SSH connection successful'"
+
+    - name: Install dependencies on droplet
+      run: |
+        echo "📦 Installing dependencies on droplet..."
+        ssh root@${{ env.DROPLET_IP }} << 'EOF'
+          # Update system
+          apt-get update
+          
+          # Install Docker if not present
+          if ! command -v docker &> /dev/null; then
+            echo "Installing Docker..."
+            curl -fsSL https://get.docker.com -o get-docker.sh
+            sh get-docker.sh
+            systemctl enable docker
+            systemctl start docker
+          fi
+          
+          # Install Docker Compose if not present
+          if ! command -v docker-compose &> /dev/null; then
+            echo "Installing Docker Compose..."
+            curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+            chmod +x /usr/local/bin/docker-compose
+          fi
+          
+          # Create deployment directory
+          mkdir -p ${{ env.DEPLOY_PATH }}
+          
+          # Create log directories
+          mkdir -p /var/log/caddy
+          
+          echo "✅ Dependencies installed"
+        EOF
+
+    - name: Deploy application files
+      run: |
+        echo "🚀 Deploying Jaguar AGI files..."
+        
+        # Create temporary deployment package
+        tar -czf jaguar-agi-deploy.tar.gz -C jaguar-local/production .
+        
+        # Copy deployment package to droplet
+        scp jaguar-agi-deploy.tar.gz root@${{ env.DROPLET_IP }}:/tmp/
+        
+        # Extract and deploy on droplet
+        ssh root@${{ env.DROPLET_IP }} << 'EOF'
+          cd ${{ env.DEPLOY_PATH }}
+          
+          # Backup existing .env.prod if it exists
+          if [ -f .env.prod ]; then
+            cp .env.prod .env.prod.backup
+            echo "📋 Backed up existing environment file"
+          fi
+          
+          # Extract new files
+          tar -xzf /tmp/jaguar-agi-deploy.tar.gz -C ${{ env.DEPLOY_PATH }}
+          
+          # Restore .env.prod if backup exists
+          if [ -f .env.prod.backup ]; then
+            mv .env.prod.backup .env.prod
+            echo "📋 Restored environment file"
+          else
+            # Generate new environment file with secure passwords
+            cp .env.prod.example .env.prod
+            
+            # Generate secure passwords
+            POSTGRES_PASSWORD=$(openssl rand -base64 32)
+            N8N_ENCRYPTION_KEY=$(openssl rand -base64 32)
+            N8N_JWT_SECRET=$(openssl rand -base64 32)
+            
+            # Update .env.prod with generated values
+            sed -i "s/your_secure_password_here_change_this/$POSTGRES_PASSWORD/g" .env.prod
+            sed -i "s/your_secure_encryption_key_here_change_this_32_chars_min/$N8N_ENCRYPTION_KEY/g" .env.prod
+            sed -i "s/your_secure_jwt_secret_here_change_this_32_chars_min/$N8N_JWT_SECRET/g" .env.prod
+            
+            chmod 600 .env.prod
+            echo "🔐 Generated new environment file with secure passwords"
+          fi
+          
+          # Create workflows directory
+          mkdir -p workflows
+          cp Jaguar_AGI_Production_Workflow.json workflows/
+          
+          # Set proper permissions
+          chmod +x deploy.sh
+          
+          # Clean up
+          rm -f /tmp/jaguar-agi-deploy.tar.gz
+          
+          echo "✅ Files deployed successfully"
+        EOF
+
+    - name: Pull Docker images
+      run: |
+        echo "📥 Pulling latest Docker images..."
+        ssh root@${{ env.DROPLET_IP }} << 'EOF'
+          cd ${{ env.DEPLOY_PATH }}
+          docker-compose -f ${{ env.DOCKER_COMPOSE_FILE }} pull
+          echo "✅ Docker images updated"
+        EOF
+
+    - name: Deploy services
+      run: |
+        echo "🐳 Deploying Docker services..."
+        ssh root@${{ env.DROPLET_IP }} << 'EOF'
+          cd ${{ env.DEPLOY_PATH }}
+          
+          # Stop existing services gracefully
+          if [ -f ${{ env.DOCKER_COMPOSE_FILE }} ]; then
+            echo "🛑 Stopping existing services..."
+            docker-compose -f ${{ env.DOCKER_COMPOSE_FILE }} --env-file .env.prod down --timeout 30
+          fi
+          
+          # Start services
+          echo "🚀 Starting Jaguar AGI services..."
+          docker-compose -f ${{ env.DOCKER_COMPOSE_FILE }} --env-file .env.prod up -d
+          
+          # Wait for services to start
+          echo "⏳ Waiting for services to start..."
+          sleep 45
+          
+          echo "✅ Services deployed"
+        EOF
+
+    - name: Install LangChain nodes
+      run: |
+        echo "🧠 Installing LangChain nodes in n8n..."
+        ssh root@${{ env.DROPLET_IP }} << 'EOF'
+          cd ${{ env.DEPLOY_PATH }}
+          
+          # Wait for n8n to be ready
+          echo "⏳ Waiting for n8n to be ready..."
+          for i in {1..30}; do
+            if docker exec jaguar-n8n npm list @n8n/n8n-nodes-langchain &> /dev/null; then
+              echo "✅ LangChain nodes already installed"
+              break
+            elif docker exec jaguar-n8n npm install @n8n/n8n-nodes-langchain &> /dev/null; then
+              echo "📦 Installing LangChain nodes..."
+              docker-compose -f ${{ env.DOCKER_COMPOSE_FILE }} restart n8n
+              echo "✅ LangChain nodes installed and n8n restarted"
+              break
+            else
+              echo "⏳ Attempt $i/30: n8n not ready yet, waiting..."
+              sleep 10
+            fi
+          done
+        EOF
+
+    - name: Health check
+      run: |
+        echo "🏥 Performing health checks..."
+        ssh root@${{ env.DROPLET_IP }} << 'EOF'
+          cd ${{ env.DEPLOY_PATH }}
+          
+          # Check service status
+          echo "📊 Service Status:"
+          docker-compose -f ${{ env.DOCKER_COMPOSE_FILE }} ps
+          
+          # Wait for services to be healthy
+          echo "⏳ Waiting for services to be healthy..."
+          sleep 30
+          
+          # Test n8n health
+          for i in {1..10}; do
+            if curl -f -s http://localhost:5678/healthz > /dev/null; then
+              echo "✅ N8N is healthy"
+              break
+            else
+              echo "⏳ N8N health check $i/10..."
+              sleep 5
+            fi
+          done
+          
+          # Test OpenWebUI health
+          for i in {1..10}; do
+            if curl -f -s http://localhost:8080/health > /dev/null; then
+              echo "✅ OpenWebUI is healthy"
+              break
+            else
+              echo "⏳ OpenWebUI health check $i/10..."
+              sleep 5
+            fi
+          done
+          
+          echo "🎉 Health checks completed"
+        EOF
+
+    - name: Test webhook endpoint
+      run: |
+        echo "🧪 Testing Jaguar webhook endpoint..."
+        ssh root@${{ env.DROPLET_IP }} << 'EOF'
+          # Test the webhook endpoint
+          RESPONSE=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+            -H "Content-Type: application/json" \
+            -d '{"chatInput": "Hello Jaguar, deployment test"}' \
+            http://localhost:5678/webhook/jaguar-agent)
+          
+          if [ "$RESPONSE" = "200" ]; then
+            echo "✅ Webhook endpoint is responding"
+          else
+            echo "⚠️ Webhook endpoint returned status: $RESPONSE"
+          fi
+        EOF
+
+    - name: Cleanup and optimize
+      run: |
+        echo "🧹 Cleaning up and optimizing..."
+        ssh root@${{ env.DROPLET_IP }} << 'EOF'
+          # Remove unused Docker images
+          docker image prune -f
+          
+          # Remove unused volumes (be careful with this)
+          # docker volume prune -f
+          
+          # Show disk usage
+          echo "💾 Disk Usage:"
+          df -h /
+          
+          echo "🐳 Docker Usage:"
+          docker system df
+          
+          echo "✅ Cleanup completed"
+        EOF
+
+    - name: Send deployment notification
+      if: always()
+      run: |
+        if [ "${{ job.status }}" = "success" ]; then
+          echo "🎉 Deployment successful!"
+          echo "📊 Services available at:"
+          echo "  • N8N: https://n8n.thespatialnetwork.net"
+          echo "  • OpenWebUI: https://ai.thespatialnetwork.net"
+        else
+          echo "❌ Deployment failed!"
+        fi
+
+    - name: Display deployment summary
+      if: success()
+      run: |
+        echo "🐆 Jaguar AGI Deployment Summary"
+        echo "================================"
+        echo "✅ Deployment completed successfully"
+        echo "🌐 Droplet IP: ${{ env.DROPLET_IP }}"
+        echo "📁 Deploy Path: ${{ env.DEPLOY_PATH }}"
+        echo "🔗 N8N: https://n8n.thespatialnetwork.net"
+        echo "🔗 OpenWebUI: https://ai.thespatialnetwork.net"
+        echo "📋 Commit: ${{ github.sha }}"
+        echo "👤 Deployed by: ${{ github.actor }}"
+        echo "⏰ Deployed at: $(date -u)"

@@ -1,0 +1,553 @@
+{
+  "name": "Documentation Sync Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 2 * * *"
+            }
+          ]
+        }
+      },
+      "id": "daily-sync-trigger",
+      "name": "Daily Documentation Sync",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [620, 340]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "sync-docs",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "manual-sync-trigger",
+      "name": "Manual Sync Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [620, 480],
+      "webhookId": "sync-docs-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "repo-list",
+              "name": "repositories",
+              "value": "[\n  {\n    \"name\": \"n8n-docs\",\n    \"url\": \"https://github.com/n8n-io/n8n-docs\",\n    \"branch\": \"main\",\n    \"paths\": [\"docs/\", \"README.md\"],\n    \"type\": \"n8n_documentation\"\n  },\n  {\n    \"name\": \"openwebui-docs\",\n    \"url\": \"https://github.com/open-webui/docs\",\n    \"branch\": \"main\",\n    \"paths\": [\"docs/\", \"README.md\"],\n    \"type\": \"openwebui_documentation\"\n  },\n  {\n    \"name\": \"n8n-core\",\n    \"url\": \"https://github.com/n8n-io/n8n\",\n    \"branch\": \"master\",\n    \"paths\": [\"packages/nodes-base/\", \"CHANGELOG.md\"],\n    \"type\": \"n8n_core_updates\"\n  },\n  {\n    \"name\": \"openwebui-core\",\n    \"url\": \"https://github.com/open-webui/open-webui\",\n    \"branch\": \"main\",\n    \"paths\": [\"docs/\", \"CHANGELOG.md\", \"README.md\"],\n    \"type\": \"openwebui_core_updates\"\n  }\n]",
+              "type": "json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "define-repositories",
+      "name": "Define Repositories",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [820, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "const repositories = $input.first().json.repositories;\nconst items = repositories.map(repo => ({ json: repo }));\nreturn items;"
+      },
+      "id": "split-repositories",
+      "name": "Split Repositories",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1020, 340]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/{{ $json.url.replace('https://github.com/', '') }}/commits/{{ $json.branch }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "options": {}
+      },
+      "id": "check-latest-commit",
+      "name": "Check Latest Commit",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1220, 340],
+      "credentials": {
+        "githubApi": {
+          "id": "github-api-credentials",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "commit-changed",
+              "leftValue": "={{ $json.sha }}",
+              "rightValue": "={{ $('Get Last Sync Info').item.json.last_commit_sha || 'never_synced' }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "id": "check-if-updated",
+      "name": "Check If Updated",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1420, 340]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/{{ $('Split Repositories').item.json.url.replace('https://github.com/', '') }}/contents/{{ $json.path }}?ref={{ $('Split Repositories').item.json.branch }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "options": {}
+      },
+      "id": "fetch-file-contents",
+      "name": "Fetch File Contents",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1620, 200],
+      "credentials": {
+        "githubApi": {
+          "id": "github-api-credentials",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Decode base64 content and prepare for indexing\nconst items = [];\nconst repoData = $('Split Repositories').item.json;\nconst fileData = $input.all();\n\nfor (const file of fileData) {\n  if (file.json.type === 'file' && file.json.content) {\n    try {\n      const content = Buffer.from(file.json.content, 'base64').toString('utf-8');\n      \n      // Skip binary files and very large files\n      if (content.length > 100000 || /[\\x00-\\x08\\x0E-\\x1F\\x7F]/.test(content)) {\n        continue;\n      }\n      \n      items.push({\n        json: {\n          content: content,\n          path: file.json.path,\n          repository: repoData.name,\n          type: repoData.type,\n          url: file.json.html_url,\n          sha: file.json.sha,\n          size: file.json.size,\n          last_modified: file.json.last_modified || new Date().toISOString()\n        }\n      });\n    } catch (error) {\n      console.log(`Error processing file ${file.json.path}: ${error.message}`);\n    }\n  }\n}\n\nreturn items;"
+      },
+      "id": "process-file-contents",
+      "name": "Process File Contents",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1820, 200]
+    },
+    {
+      "parameters": {
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "repository",
+                "value": "={{ $json.repository }}"
+              },
+              {
+                "name": "file_path",
+                "value": "={{ $json.path }}"
+              },
+              {
+                "name": "doc_type",
+                "value": "={{ $json.type }}"
+              },
+              {
+                "name": "source_url",
+                "value": "={{ $json.url }}"
+              },
+              {
+                "name": "last_updated",
+                "value": "={{ $json.last_modified }}"
+              },
+              {
+                "name": "content_hash",
+                "value": "={{ $json.sha }}"
+              },
+              {
+                "name": "indexed_at",
+                "value": "={{ new Date().toISOString() }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "document-loader-docs",
+      "name": "Document Loader (Docs)",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [2020, 200]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1500,
+        "chunkOverlap": 300,
+        "options": {}
+      },
+      "id": "text-splitter-docs",
+      "name": "Text Splitter (Docs)",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [2020, 340]
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "id": "embeddings-docs",
+      "name": "Embeddings (Docs)",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [1820, 340],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "documentation_knowledge",
+          "mode": "list",
+          "cachedResultName": "documentation_knowledge"
+        },
+        "options": {}
+      },
+      "id": "store-docs-qdrant",
+      "name": "Store Docs in Qdrant",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1,
+      "position": [2220, 200],
+      "credentials": {
+        "qdrantApi": {
+          "id": "qdrant-credentials",
+          "name": "Qdrant API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://jaguar-qdrant:6333/collections/documentation_knowledge/points",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "points",
+              "value": "[]"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "clear-old-docs",
+      "name": "Clear Old Documentation",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1620, 340]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "http://jaguar-postgres:5432/sync_status?repo={{ $('Split Repositories').item.json.name }}",
+        "options": {}
+      },
+      "id": "get-last-sync-info",
+      "name": "Get Last Sync Info",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1220, 480]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://jaguar-postgres:5432/sync_status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "repository",
+              "value": "={{ $('Split Repositories').item.json.name }}"
+            },
+            {
+              "name": "last_commit_sha",
+              "value": "={{ $('Check Latest Commit').item.json.sha }}"
+            },
+            {
+              "name": "last_sync_time",
+              "value": "={{ new Date().toISOString() }}"
+            },
+            {
+              "name": "files_processed",
+              "value": "={{ $('Process File Contents').all().length }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-sync-status",
+      "name": "Update Sync Status",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2420, 200]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "sync-result",
+              "name": "result",
+              "value": "Documentation sync completed for {{ $('Split Repositories').item.json.name }}. Files processed: {{ $('Process File Contents').all().length }}. Last commit: {{ $('Check Latest Commit').item.json.sha.slice(0, 7) }}",
+              "type": "string"
+            },
+            {
+              "id": "timestamp",
+              "name": "synced_at",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-sync-result",
+      "name": "Format Sync Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2620, 200]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "respond-webhook-sync",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2820, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get directory contents recursively\nconst repoData = $('Split Repositories').item.json;\nconst paths = repoData.paths;\nconst items = [];\n\nfor (const path of paths) {\n  items.push({\n    json: {\n      path: path,\n      repository: repoData.name,\n      url: repoData.url,\n      branch: repoData.branch\n    }\n  });\n}\n\nreturn items;"
+      },
+      "id": "expand-paths",
+      "name": "Expand Paths",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1620, 120]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily Documentation Sync": {
+      "main": [
+        [
+          {
+            "node": "Define Repositories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Sync Trigger": {
+      "main": [
+        [
+          {
+            "node": "Define Repositories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Define Repositories": {
+      "main": [
+        [
+          {
+            "node": "Split Repositories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Repositories": {
+      "main": [
+        [
+          {
+            "node": "Check Latest Commit",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Last Sync Info",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Latest Commit": {
+      "main": [
+        [
+          {
+            "node": "Check If Updated",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check If Updated": {
+      "main": [
+        [
+          {
+            "node": "Expand Paths",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Expand Paths": {
+      "main": [
+        [
+          {
+            "node": "Fetch File Contents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch File Contents": {
+      "main": [
+        [
+          {
+            "node": "Process File Contents",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process File Contents": {
+      "main": [
+        [
+          {
+            "node": "Store Docs in Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Loader (Docs)": {
+      "ai_document": [
+        [
+          {
+            "node": "Store Docs in Qdrant",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Splitter (Docs)": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Document Loader (Docs)",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings (Docs)": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Store Docs in Qdrant",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store Docs in Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Update Sync Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Sync Status": {
+      "main": [
+        [
+          {
+            "node": "Format Sync Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Sync Result": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "documentation-sync-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "jaguar-local-instance"
+  },
+  "id": "documentation-sync-workflow",
+  "tags": ["jaguar", "documentation", "sync", "self-updating"]
+}

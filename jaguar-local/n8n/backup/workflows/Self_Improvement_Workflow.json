@@ -1,0 +1,561 @@
+{
+  "name": "Jaguar Self-Improvement Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "self-improve",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "self-improve-trigger",
+      "name": "Self-Improvement Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [620, 340],
+      "webhookId": "self-improve-webhook"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 3 * * 0"
+            }
+          ]
+        }
+      },
+      "id": "weekly-improvement",
+      "name": "Weekly Self-Improvement",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [620, 480]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "improvement-type",
+              "name": "improvementType",
+              "value": "={{ $json.type || $json.body.type || 'comprehensive' }}",
+              "type": "string"
+            },
+            {
+              "id": "focus-area",
+              "name": "focusArea",
+              "value": "={{ $json.focus || $json.body.focus || 'all' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-improvement-params",
+      "name": "Extract Improvement Parameters",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [820, 340]
+    },
+    {
+      "parameters": {
+        "model": "llama3.1:latest",
+        "options": {}
+      },
+      "id": "analysis-llm",
+      "name": "Analysis LLM",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [1220, 200],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "documentation_knowledge",
+        "topK": 10
+      },
+      "id": "docs-analysis-tool",
+      "name": "Documentation Analysis Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [1220, 340]
+    },
+    {
+      "parameters": {
+        "name": "masterclass_knowledge",
+        "topK": 10
+      },
+      "id": "masterclass-analysis-tool",
+      "name": "Masterclass Analysis Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [1220, 420]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are Jaguar's Self-Improvement Analysis System. Your task is to analyze the latest documentation and masterclass knowledge to identify improvements for Jaguar's capabilities.\n\nANALYSIS FOCUS:\n- New features in n8n and OpenWebUI that Jaguar should leverage\n- Deprecated features that need migration\n- Best practice updates from the latest documentation\n- New patterns from masterclass evolution\n- Performance optimizations\n- Security improvements\n- User experience enhancements\n\nIMPROVEMENT AREAS:\n1. **System Prompts**: Update knowledge, capabilities, and guidance\n2. **Workflows**: Add new nodes, optimize connections, improve error handling\n3. **Integration Patterns**: New API endpoints, authentication methods\n4. **Knowledge Base**: Expand coverage, improve retrieval accuracy\n5. **Self-Generative Features**: Enhance automation and learning capabilities\n\nOUTPUT FORMAT:\nProvide a JSON response with:\n```json\n{\n  \"improvements\": [\n    {\n      \"type\": \"system_prompt|workflow|integration|knowledge\",\n      \"priority\": \"high|medium|low\",\n      \"title\": \"Brief description\",\n      \"description\": \"Detailed explanation\",\n      \"implementation\": \"Specific steps to implement\",\n      \"benefits\": \"Expected improvements\",\n      \"risks\": \"Potential issues to consider\"\n    }\n  ],\n  \"deprecated_features\": [\n    {\n      \"feature\": \"Feature name\",\n      \"replacement\": \"New approach\",\n      \"migration_steps\": \"How to migrate\"\n    }\n  ],\n  \"new_capabilities\": [\n    {\n      \"capability\": \"New feature\",\n      \"integration_approach\": \"How to integrate\",\n      \"use_cases\": \"When to use\"\n    }\n  ]\n}\n```\n\nCurrent improvement focus: {focusArea}\nImprovement type: {improvementType}"
+      },
+      "id": "analysis-prompt",
+      "name": "Self-Improvement Analysis Prompt",
+      "type": "@n8n/n8n-nodes-langchain.promptTemplate",
+      "typeVersion": 1,
+      "position": [1020, 200]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "improvement-analyzer",
+      "name": "Improvement Analyzer",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [1020, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Parse the improvement analysis and prioritize actions\nconst analysisResult = $input.first().json.output;\nlet improvements;\n\ntry {\n  // Try to parse JSON from the analysis\n  const jsonMatch = analysisResult.match(/```json\\s*([\\s\\S]*?)\\s*```/);\n  if (jsonMatch) {\n    improvements = JSON.parse(jsonMatch[1]);\n  } else {\n    // Fallback: try to parse the entire output as JSON\n    improvements = JSON.parse(analysisResult);\n  }\n} catch (error) {\n  // If parsing fails, create a basic structure\n  improvements = {\n    improvements: [{\n      type: \"analysis_error\",\n      priority: \"low\",\n      title: \"Analysis parsing failed\",\n      description: analysisResult,\n      implementation: \"Manual review required\",\n      benefits: \"N/A\",\n      risks: \"N/A\"\n    }],\n    deprecated_features: [],\n    new_capabilities: []\n  };\n}\n\n// Prioritize high-priority improvements\nconst highPriorityImprovements = improvements.improvements.filter(imp => imp.priority === 'high');\nconst mediumPriorityImprovements = improvements.improvements.filter(imp => imp.priority === 'medium');\n\nconst items = [];\n\n// Process high-priority improvements first\nfor (const improvement of highPriorityImprovements) {\n  items.push({\n    json: {\n      ...improvement,\n      action: 'implement',\n      category: 'high_priority'\n    }\n  });\n}\n\n// Add deprecated features for migration\nfor (const deprecated of improvements.deprecated_features || []) {\n  items.push({\n    json: {\n      type: 'migration',\n      priority: 'high',\n      title: `Migrate from ${deprecated.feature}`,\n      description: `Replace deprecated feature: ${deprecated.feature}`,\n      implementation: deprecated.migration_steps,\n      benefits: 'Maintain compatibility with latest versions',\n      risks: 'Potential breaking changes',\n      action: 'migrate',\n      category: 'deprecated'\n    }\n  });\n}\n\n// Add new capabilities for integration\nfor (const capability of improvements.new_capabilities || []) {\n  items.push({\n    json: {\n      type: 'capability',\n      priority: 'medium',\n      title: `Integrate ${capability.capability}`,\n      description: capability.integration_approach,\n      implementation: capability.use_cases,\n      benefits: 'Enhanced functionality',\n      risks: 'Complexity increase',\n      action: 'integrate',\n      category: 'new_feature'\n    }\n  });\n}\n\nreturn items;"
+      },
+      "id": "prioritize-improvements",
+      "name": "Prioritize Improvements",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1220, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "system-prompt-update",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "system_prompt",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "workflow-update",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "workflow",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            },
+            {
+              "id": "migration-needed",
+              "leftValue": "={{ $json.type }}",
+              "rightValue": "migration",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "id": "route-improvements",
+      "name": "Route Improvements",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1420, 340]
+    },
+    {
+      "parameters": {
+        "model": "llama3.1:latest",
+        "options": {}
+      },
+      "id": "prompt-generator",
+      "name": "System Prompt Generator",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [1620, 200],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "Generate an updated system prompt for Jaguar based on the following improvement:\n\nImprovement: {title}\nDescription: {description}\nImplementation: {implementation}\n\nCurrent system prompt context:\n- Jaguar is a self-generative AI developer agent\n- Has access to masterclass knowledge and latest documentation\n- Can perform workflow CRUD, GitHub operations, and knowledge queries\n- Focuses on natural wisdom and progressive learning\n\nGenerate a complete, updated system prompt that incorporates this improvement while maintaining Jaguar's core identity and capabilities. The prompt should be ready to use directly in the n8n workflow.\n\nFormat as a complete system prompt, not as a diff or partial update."
+      },
+      "id": "prompt-update-template",
+      "name": "Prompt Update Template",
+      "type": "@n8n/n8n-nodes-langchain.promptTemplate",
+      "typeVersion": 1,
+      "position": [1620, 120]
+    },
+    {
+      "parameters": {
+        "method": "PUT",
+        "url": "http://jaguar-n8n:5678/api/v1/workflows/jaguar-agent-workflow",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "n8nApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "nodes",
+              "value": "={{ $json.updatedNodes }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "update-workflow",
+      "name": "Update Jaguar Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1620, 340],
+      "credentials": {
+        "n8nApi": {
+          "id": "n8n-api-credentials",
+          "name": "N8N API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/The-Spatial-Network/ai-agents-masterclass/contents/jaguar-local/system-prompts/jaguar-n8n-system-prompt.md",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.v3+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "message",
+              "value": "🐆 Jaguar Self-Improvement: Updated system prompt based on latest documentation"
+            },
+            {
+              "name": "content",
+              "value": "={{ Buffer.from($('System Prompt Generator').item.json.output).toString('base64') }}"
+            },
+            {
+              "name": "sha",
+              "value": "={{ $('Get Current Prompt SHA').item.json.sha }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "commit-prompt-update",
+      "name": "Commit Prompt Update",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1820, 200],
+      "credentials": {
+        "githubApi": {
+          "id": "github-api-credentials",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://api.github.com/repos/The-Spatial-Network/ai-agents-masterclass/contents/jaguar-local/system-prompts/jaguar-n8n-system-prompt.md",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "options": {}
+      },
+      "id": "get-current-prompt-sha",
+      "name": "Get Current Prompt SHA",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1620, 280],
+      "credentials": {
+        "githubApi": {
+          "id": "github-api-credentials",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "improvement-summary",
+              "name": "result",
+              "value": "Jaguar Self-Improvement completed. Processed {{ $('Prioritize Improvements').all().length }} improvements. High priority: {{ $('Prioritize Improvements').all().filter(item => item.json.priority === 'high').length }}. Updates applied to system prompts and workflows.",
+              "type": "string"
+            },
+            {
+              "id": "timestamp",
+              "name": "improved_at",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            },
+            {
+              "id": "improvements-applied",
+              "name": "improvements_applied",
+              "value": "={{ $('Prioritize Improvements').all().map(item => item.json.title) }}",
+              "type": "json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-improvement-result",
+      "name": "Format Improvement Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2020, 340]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "respond-improvement-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2220, 340]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Self-Improvement Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Improvement Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Weekly Self-Improvement": {
+      "main": [
+        [
+          {
+            "node": "Extract Improvement Parameters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Improvement Parameters": {
+      "main": [
+        [
+          {
+            "node": "Improvement Analyzer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analysis LLM": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Improvement Analyzer",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "System Prompt Generator",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documentation Analysis Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Improvement Analyzer",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Masterclass Analysis Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Improvement Analyzer",
+            "type": "ai_tool",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Self-Improvement Analysis Prompt": {
+      "ai_prompt": [
+        [
+          {
+            "node": "Improvement Analyzer",
+            "type": "ai_prompt",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Improvement Analyzer": {
+      "main": [
+        [
+          {
+            "node": "Prioritize Improvements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prioritize Improvements": {
+      "main": [
+        [
+          {
+            "node": "Route Improvements",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Improvements": {
+      "main": [
+        [
+          {
+            "node": "System Prompt Generator",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Get Current Prompt SHA",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Format Improvement Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prompt Update Template": {
+      "ai_prompt": [
+        [
+          {
+            "node": "System Prompt Generator",
+            "type": "ai_prompt",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "System Prompt Generator": {
+      "main": [
+        [
+          {
+            "node": "Commit Prompt Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Jaguar Workflow": {
+      "main": [
+        [
+          {
+            "node": "Format Improvement Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Commit Prompt Update": {
+      "main": [
+        [
+          {
+            "node": "Format Improvement Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Current Prompt SHA": {
+      "main": [
+        [
+          {
+            "node": "Commit Prompt Update",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Improvement Result": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "self-improvement-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "jaguar-local-instance"
+  },
+  "id": "jaguar-self-improvement-workflow",
+  "tags": ["jaguar", "self-improvement", "automation", "evolution"]
+}

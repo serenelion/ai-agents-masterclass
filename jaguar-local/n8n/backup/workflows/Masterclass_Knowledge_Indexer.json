@@ -1,0 +1,335 @@
+{
+  "name": "Masterclass Knowledge Indexer",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 */6 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Indexing",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [620, 340]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "index-masterclass",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "manual-trigger",
+      "name": "Manual Index Trigger",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [620, 480],
+      "webhookId": "index-masterclass-webhook"
+    },
+    {
+      "parameters": {
+        "command": "find /data/masterclass -type f \\( -name '*.md' -o -name '*.py' -o -name '*.json' -o -name '*.txt' \\) | head -100"
+      },
+      "id": "find-files",
+      "name": "Find Masterclass Files",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [820, 340]
+    },
+    {
+      "parameters": {
+        "jsCode": "const files = $input.first().json.stdout.split('\\n').filter(f => f.trim());\nconst items = files.map(file => ({ json: { filePath: file } }));\nreturn items;"
+      },
+      "id": "split-files",
+      "name": "Split File Paths",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1020, 340]
+    },
+    {
+      "parameters": {
+        "filePath": "={{ $json.filePath }}",
+        "options": {}
+      },
+      "id": "read-file",
+      "name": "Read File Content",
+      "type": "n8n-nodes-base.readBinaryFile",
+      "typeVersion": 1,
+      "position": [1220, 340]
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "id": "extract-text",
+      "name": "Extract Text",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [1420, 340]
+    },
+    {
+      "parameters": {
+        "options": {
+          "metadata": {
+            "metadataValues": [
+              {
+                "name": "file_path",
+                "value": "={{ $('Split File Paths').item.json.filePath }}"
+              },
+              {
+                "name": "file_type",
+                "value": "={{ $('Split File Paths').item.json.filePath.split('.').pop() }}"
+              },
+              {
+                "name": "source",
+                "value": "ai-agents-masterclass"
+              },
+              {
+                "name": "indexed_at",
+                "value": "={{ new Date().toISOString() }}"
+              },
+              {
+                "name": "lesson_number",
+                "value": "={{ $('Split File Paths').item.json.filePath.match(/\\/(\\d+)-/) ? $('Split File Paths').item.json.filePath.match(/\\/(\\d+)-/)[1] : 'general' }}"
+              }
+            ]
+          }
+        }
+      },
+      "id": "document-loader",
+      "name": "Document Loader",
+      "type": "@n8n/n8n-nodes-langchain.documentDefaultDataLoader",
+      "typeVersion": 1,
+      "position": [1620, 340]
+    },
+    {
+      "parameters": {
+        "chunkSize": 1000,
+        "chunkOverlap": 200,
+        "options": {}
+      },
+      "id": "text-splitter",
+      "name": "Text Splitter",
+      "type": "@n8n/n8n-nodes-langchain.textSplitterRecursiveCharacterTextSplitter",
+      "typeVersion": 1,
+      "position": [1620, 480]
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "id": "embeddings",
+      "name": "Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [1420, 480],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "insert",
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "masterclass_knowledge",
+          "mode": "list",
+          "cachedResultName": "masterclass_knowledge"
+        },
+        "options": {}
+      },
+      "id": "vector-store",
+      "name": "Store in Qdrant",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1,
+      "position": [1820, 340],
+      "credentials": {
+        "qdrantApi": {
+          "id": "qdrant-credentials",
+          "name": "Qdrant API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "indexing-result",
+              "name": "result",
+              "value": "Masterclass knowledge base has been successfully indexed. Files processed: {{ $('Split File Paths').all().length }}",
+              "type": "string"
+            },
+            {
+              "id": "timestamp",
+              "name": "indexed_at",
+              "value": "={{ new Date().toISOString() }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-result",
+      "name": "Format Result",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2020, 340]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "respond-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [2220, 340]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Indexing": {
+      "main": [
+        [
+          {
+            "node": "Find Masterclass Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Index Trigger": {
+      "main": [
+        [
+          {
+            "node": "Find Masterclass Files",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find Masterclass Files": {
+      "main": [
+        [
+          {
+            "node": "Split File Paths",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split File Paths": {
+      "main": [
+        [
+          {
+            "node": "Read File Content",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read File Content": {
+      "main": [
+        [
+          {
+            "node": "Extract Text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Text": {
+      "main": [
+        [
+          {
+            "node": "Store in Qdrant",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Document Loader": {
+      "ai_document": [
+        [
+          {
+            "node": "Store in Qdrant",
+            "type": "ai_document",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Splitter": {
+      "ai_textSplitter": [
+        [
+          {
+            "node": "Document Loader",
+            "type": "ai_textSplitter",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Store in Qdrant",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Store in Qdrant": {
+      "main": [
+        [
+          {
+            "node": "Format Result",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Result": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "masterclass-indexer-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "jaguar-local-instance"
+  },
+  "id": "masterclass-knowledge-indexer",
+  "tags": ["jaguar", "rag", "indexing", "masterclass"]
+}

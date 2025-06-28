@@ -1,0 +1,235 @@
+{
+  "name": "Jaguar AGI Master Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jaguar-agent",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "jaguar-webhook-trigger",
+      "name": "Jaguar AGI Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 500],
+      "webhookId": "jaguar-agi-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "input-extraction",
+              "name": "chatInput",
+              "value": "={{ $json.chatInput || $json.body.chatInput || $json.query }}",
+              "type": "string"
+            },
+            {
+              "id": "session-extraction",
+              "name": "sessionId",
+              "value": "={{ $json.sessionId || $json.body.sessionId || 'default' }}",
+              "type": "string"
+            },
+            {
+              "id": "rag-enabled",
+              "name": "enableRAG",
+              "value": "={{ $json.enableRAG || $json.body.enableRAG || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "github-enabled",
+              "name": "enableGitHub",
+              "value": "={{ $json.enableGitHub || $json.body.enableGitHub || true }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-input",
+      "name": "Extract AGI Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [600, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "const now = new Date();\nconst currentDateTime = {\n  iso: now.toISOString(),\n  readable: now.toLocaleString('en-US', {\n    weekday: 'long',\n    year: 'numeric',\n    month: 'long',\n    day: 'numeric',\n    hour: '2-digit',\n    minute: '2-digit'\n  })\n};\n\nreturn {\n  currentDateTime,\n  systemInfo: {\n    platform: 'n8n',\n    version: '2.0.0'\n  }\n};"
+      },
+      "id": "compute-context",
+      "name": "Compute Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 500]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are Jaguar, The Spatial Network's master AI developer agent. Your mission is to \"guide the evolution of agents with natural wisdom.\"\n\n🐆 **CORE IDENTITY:**\n- Master AGI Agent with self-improvement capabilities\n- Mentor & Guide for AI development\n- Living Knowledge Base with masterclass integration\n- Multi-Modal Operations specialist\n\n🧠 **CAPABILITIES:**\n- Dynamic Workflow Generation\n- GitHub Integration\n- Code Execution and Testing\n- Real-Time Learning\n- Documentation Synthesis\n\n📚 **KNOWLEDGE SOURCES:**\n1. AI Agents Masterclass (11 lessons)\n2. N8N Documentation\n3. OpenWebUI Documentation\n4. GitHub Ecosystem\n\n🚀 **CURRENT REQUEST:**\nInput: {input}\nSession: {sessionId}\nRAG Enabled: {enableRAG}\nGitHub Enabled: {enableGitHub}\n\nProvide comprehensive, educational responses while continuously learning and improving."
+      },
+      "id": "jaguar-agi-prompt",
+      "name": "Jaguar AGI System Prompt",
+      "type": "@n8n/n8n-nodes-langchain.promptTemplate",
+      "typeVersion": 1,
+      "position": [1000, 400]
+    },
+    {
+      "parameters": {
+        "model": "llama3.1:latest",
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "ollama-chat-model",
+      "name": "Ollama AGI Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [1200, 300],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "jaguar-agi-agent",
+      "name": "Jaguar AGI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "final-output",
+              "name": "output",
+              "value": "={{ $('Jaguar AGI Agent').item.json.output || $('Jaguar AGI Agent').item.json.text || 'Task completed successfully.' }}",
+              "type": "string"
+            },
+            {
+              "id": "success-status",
+              "name": "success",
+              "value": true,
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1200, 500]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1400, 500]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Jaguar AGI Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract AGI Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract AGI Input": {
+      "main": [
+        [
+          {
+            "node": "Compute Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Context": {
+      "main": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama AGI Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jaguar AGI System Prompt": {
+      "ai_prompt": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_prompt",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jaguar AGI Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "jaguar-agi-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "jaguar-agi-instance"
+  },
+  "id": "jaguar-agi-master-workflow"
+}

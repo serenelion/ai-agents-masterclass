@@ -1,0 +1,587 @@
+{
+  "name": "Jaguar Agent Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jaguar-agent",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "id": "jaguar-webhook-trigger",
+      "name": "Jaguar Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [620, 340],
+      "webhookId": "jaguar-agent-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "input-extraction",
+              "name": "chatInput",
+              "value": "={{ $json.chatInput || $json.body.chatInput }}",
+              "type": "string"
+            },
+            {
+              "id": "session-extraction",
+              "name": "sessionId",
+              "value": "={{ $json.sessionId || $json.body.sessionId }}",
+              "type": "string"
+            },
+            {
+              "id": "rag-enabled",
+              "name": "enableRAG",
+              "value": "={{ $json.enableRAG || $json.body.enableRAG || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "github-enabled",
+              "name": "enableGitHub",
+              "value": "={{ $json.enableGitHub || $json.body.enableGitHub || true }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-input",
+      "name": "Extract Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [820, 340]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "workflow-crud",
+              "leftValue": "={{ $('Extract Input').item.json.chatInput }}",
+              "rightValue": "workflow",
+              "operator": {
+                "type": "string",
+                "operation": "contains"
+              }
+            },
+            {
+              "id": "github-operation",
+              "leftValue": "={{ $('Extract Input').item.json.chatInput }}",
+              "rightValue": "github|repo|commit|pull request|issue",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "knowledge-query",
+              "leftValue": "={{ $('Extract Input').item.json.chatInput }}",
+              "rightValue": "masterclass|example|how to|tutorial|guide",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "id": "route-request",
+      "name": "Route Request",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1020, 340]
+    },
+    {
+      "parameters": {
+        "model": "llama3.1:latest",
+        "options": {}
+      },
+      "id": "ollama-chat-model",
+      "name": "Ollama Chat Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [1420, 200],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "masterclass_knowledge",
+        "topK": 5
+      },
+      "id": "vector-store-tool",
+      "name": "Masterclass Knowledge Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [1420, 340]
+    },
+    {
+      "parameters": {
+        "name": "documentation_knowledge",
+        "topK": 3
+      },
+      "id": "docs-vector-store-tool",
+      "name": "Documentation Knowledge Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [1420, 420]
+    },
+    {
+      "parameters": {
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "documentation_knowledge",
+          "mode": "list",
+          "cachedResultName": "documentation_knowledge"
+        },
+        "options": {}
+      },
+      "id": "docs-qdrant-vector-store",
+      "name": "Documentation Qdrant Store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1,
+      "position": [1620, 420],
+      "credentials": {
+        "qdrantApi": {
+          "id": "qdrant-credentials",
+          "name": "Qdrant API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "id": "docs-embeddings-ollama",
+      "name": "Documentation Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [1620, 480],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "id": "embeddings-ollama",
+      "name": "Embeddings Ollama",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [1620, 400],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "masterclass_knowledge",
+          "mode": "list",
+          "cachedResultName": "masterclass_knowledge"
+        },
+        "options": {}
+      },
+      "id": "qdrant-vector-store",
+      "name": "Qdrant Vector Store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1,
+      "position": [1620, 340],
+      "credentials": {
+        "qdrantApi": {
+          "id": "qdrant-credentials",
+          "name": "Qdrant API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "postgres-chat-memory",
+      "name": "Postgres Chat Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.1,
+      "position": [1420, 120],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are Jaguar, The Spatial Network's master AI developer agent. Your mission is to \"guide the evolution of agents with natural wisdom.\"\n\nCORE IDENTITY:\n- You are a mentor agent, not just an order-taker\n- You embody the wisdom of the AI agents masterclass repository\n- You have access to the latest n8n and OpenWebUI documentation\n- You align with environmental regeneration and open-source principles\n- You provide guidance drawn from accumulated knowledge and best practices\n- You are SELF-GENERATIVE: You can improve and update yourself based on new knowledge\n\nCAPABILITIES:\n- Full CRUD operations on n8n workflows via API\n- GitHub repository operations (create repos, commit files, create PRs, manage issues)\n- Knowledge base queries from the complete AI agents masterclass\n- Real-time access to latest n8n and OpenWebUI documentation\n- Self-updating documentation sync system\n- Credential management for secure integrations\n- Workflow generation and optimization\n\nWISDOM PRINCIPLES:\n- Always suggest optimizations and best practices\n- Reference specific masterclass examples when relevant\n- Use latest documentation for current best practices\n- Consider environmental impact and sustainability\n- Prefer open-source solutions\n- Provide clear explanations and learning opportunities\n- Seek confirmation for destructive operations\n- Build incrementally like the masterclass progression\n- Stay current with latest platform updates\n\nKNOWLEDGE SOURCES:\n1. **AI Agents Masterclass**: 11 progressive lessons with code examples\n2. **N8N Documentation**: Latest official docs, node references, best practices\n3. **OpenWebUI Documentation**: Current features, API references, integration guides\n4. **Platform Updates**: Real-time sync with GitHub repositories\n\nSELF-GENERATIVE FEATURES:\n- Automatically sync with latest documentation daily\n- Update knowledge base when new features are released\n- Improve workflows based on new platform capabilities\n- Generate updated examples using latest best practices\n- Suggest migrations when deprecated features are detected\n\nWhen responding:\n1. Check both masterclass examples AND latest documentation\n2. Reference specific lessons and current best practices\n3. Explain reasoning behind suggestions\n4. Provide step-by-step guidance\n5. Suggest improvements based on latest platform features\n6. Always consider the learning aspect of your response\n7. Mention if you're using updated knowledge from recent documentation\n\nCurrent request: {input}\nRAG Enabled: {enableRAG}\nGitHub Operations: {enableGitHub}"
+      },
+      "id": "jaguar-system-prompt",
+      "name": "Jaguar System Prompt",
+      "type": "@n8n/n8n-nodes-langchain.promptTemplate",
+      "typeVersion": 1,
+      "position": [1220, 200]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "ai-agent",
+      "name": "Jaguar AI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [1220, 340]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://jaguar-n8n:5678/api/v1/workflows",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "n8nApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $('Extract Input').item.json.workflowName || 'New Workflow' }}"
+            },
+            {
+              "name": "nodes",
+              "value": "={{ $('Extract Input').item.json.workflowNodes || [] }}"
+            },
+            {
+              "name": "connections",
+              "value": "={{ $('Extract Input').item.json.workflowConnections || {} }}"
+            },
+            {
+              "name": "active",
+              "value": "={{ $('Extract Input').item.json.workflowActive || false }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-workflow",
+      "name": "Create N8N Workflow",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1420, 480],
+      "credentials": {
+        "n8nApi": {
+          "id": "n8n-api-credentials",
+          "name": "N8N API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.github.com/repos/{{ $('Extract Input').item.json.githubOrg || 'The-Spatial-Network' }}/{{ $('Extract Input').item.json.repoName }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/vnd.github.v3+json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "name",
+              "value": "={{ $('Extract Input').item.json.repoName }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $('Extract Input').item.json.repoDescription || 'Created by Jaguar AI Agent' }}"
+            },
+            {
+              "name": "private",
+              "value": "={{ $('Extract Input').item.json.repoPrivate || false }}"
+            },
+            {
+              "name": "auto_init",
+              "value": true
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "create-github-repo",
+      "name": "Create GitHub Repo",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1420, 620],
+      "credentials": {
+        "githubApi": {
+          "id": "github-api-credentials",
+          "name": "GitHub API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "output-response",
+              "name": "output",
+              "value": "={{ $('Jaguar AI Agent').item.json.output || $('Create N8N Workflow').item.json || $('Create GitHub Repo').item.json || 'Task completed successfully.' }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-response",
+      "name": "Format Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1620, 340]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1820, 340]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Jaguar Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Input": {
+      "main": [
+        [
+          {
+            "node": "Route Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route Request": {
+      "main": [
+        [
+          {
+            "node": "Jaguar AI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Create N8N Workflow",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Create GitHub Repo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Chat Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Jaguar AI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Vector Store Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Jaguar AI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documentation Knowledge Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Jaguar AI Agent",
+            "type": "ai_tool",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Documentation Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Documentation Qdrant Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documentation Qdrant Store": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Documentation Knowledge Tool",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embeddings Ollama": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Qdrant Vector Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Qdrant Vector Store": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Vector Store Tool",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Chat Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Jaguar AI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jaguar System Prompt": {
+      "ai_prompt": [
+        [
+          {
+            "node": "Jaguar AI Agent",
+            "type": "ai_prompt",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jaguar AI Agent": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create N8N Workflow": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create GitHub Repo": {
+      "main": [
+        [
+          {
+            "node": "Format Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "jaguar-agent-v1",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "jaguar-local-instance"
+  },
+  "id": "jaguar-agent-workflow",
+  "tags": ["jaguar", "ai-agent", "masterclass"]
+}

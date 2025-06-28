@@ -1,0 +1,799 @@
+{
+  "name": "Jaguar AGI Master Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "jaguar-agent",
+        "responseMode": "responseNode",
+        "options": {
+          "allowedOrigins": "*"
+        }
+      },
+      "id": "jaguar-webhook-trigger",
+      "name": "Jaguar AGI Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [400, 500],
+      "webhookId": "jaguar-agi-webhook"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "input-extraction",
+              "name": "chatInput",
+              "value": "={{ $json.chatInput || $json.body.chatInput || $json.query }}",
+              "type": "string"
+            },
+            {
+              "id": "session-extraction",
+              "name": "sessionId",
+              "value": "={{ $json.sessionId || $json.body.sessionId || 'default' }}",
+              "type": "string"
+            },
+            {
+              "id": "message-id",
+              "name": "messageId",
+              "value": "={{ $json.messageId || $json.body.messageId || '' }}",
+              "type": "string"
+            },
+            {
+              "id": "timestamp",
+              "name": "timestamp",
+              "value": "={{ $json.timestamp || $json.body.timestamp || $now }}",
+              "type": "string"
+            },
+            {
+              "id": "user-info",
+              "name": "userInfo",
+              "value": "={{ $json.userInfo || $json.body.userInfo || {} }}",
+              "type": "object"
+            },
+            {
+              "id": "complexity-analysis",
+              "name": "complexityAnalysis",
+              "value": "={{ $json.complexityAnalysis || $json.body.complexityAnalysis || {} }}",
+              "type": "object"
+            },
+            {
+              "id": "session-context",
+              "name": "sessionContext",
+              "value": "={{ $json.sessionContext || $json.body.sessionContext || {} }}",
+              "type": "object"
+            },
+            {
+              "id": "learning-data",
+              "name": "learningData",
+              "value": "={{ $json.learningData || $json.body.learningData || {} }}",
+              "type": "object"
+            },
+            {
+              "id": "rag-enabled",
+              "name": "enableRAG",
+              "value": "={{ $json.enableRAG || $json.body.enableRAG || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "github-enabled",
+              "name": "enableGitHub",
+              "value": "={{ $json.enableGitHub || $json.body.enableGitHub || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "workflow-generation",
+              "name": "enableWorkflowGeneration",
+              "value": "={{ $json.enableWorkflowGeneration || $json.body.enableWorkflowGeneration || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "self-improvement",
+              "name": "enableSelfImprovement",
+              "value": "={{ $json.enableSelfImprovement || $json.body.enableSelfImprovement || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "code-execution",
+              "name": "enableCodeExecution",
+              "value": "={{ $json.enableCodeExecution || $json.body.enableCodeExecution || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "documentation-sync",
+              "name": "enableDocumentationSync",
+              "value": "={{ $json.enableDocumentationSync || $json.body.enableDocumentationSync || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "multi-agent-coordination",
+              "name": "enableMultiAgentCoordination",
+              "value": "={{ $json.enableMultiAgentCoordination || $json.body.enableMultiAgentCoordination || true }}",
+              "type": "boolean"
+            },
+            {
+              "id": "creativity-level",
+              "name": "creativityLevel",
+              "value": "={{ $json.creativityLevel || $json.body.creativityLevel || 0.7 }}",
+              "type": "number"
+            },
+            {
+              "id": "max-iterations",
+              "name": "maxIterations",
+              "value": "={{ $json.maxIterations || $json.body.maxIterations || 5 }}",
+              "type": "number"
+            },
+            {
+              "id": "github-org",
+              "name": "githubOrg",
+              "value": "={{ $json.githubOrg || $json.body.githubOrg || 'The-Spatial-Network' }}",
+              "type": "string"
+            },
+            {
+              "id": "debug-mode",
+              "name": "debugMode",
+              "value": "={{ $json.debugMode || $json.body.debugMode || false }}",
+              "type": "boolean"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "extract-input",
+      "name": "Extract AGI Input",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [600, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Get current date and time for context\nconst now = new Date();\nconst currentDateTime = {\n  iso: now.toISOString(),\n  readable: now.toLocaleString('en-US', {\n    weekday: 'long',\n    year: 'numeric',\n    month: 'long',\n    day: 'numeric',\n    hour: '2-digit',\n    minute: '2-digit',\n    timeZoneName: 'short'\n  }),\n  timestamp: now.getTime(),\n  timezone: Intl.DateTimeFormat().resolvedOptions().timeZone\n};\n\nreturn {\n  currentDateTime,\n  systemInfo: {\n    platform: 'n8n',\n    version: '2.0.0',\n    capabilities: ['rag', 'github', 'workflow-generation', 'self-improvement']\n  }\n};"
+      },
+      "id": "compute-context",
+      "name": "Compute Context",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [800, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "workflow-crud",
+              "leftValue": "={{ $('Extract AGI Input').item.json.chatInput }}",
+              "rightValue": "workflow|n8n|create|build|generate",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "github-operation",
+              "leftValue": "={{ $('Extract AGI Input').item.json.chatInput }}",
+              "rightValue": "github|repo|repository|commit|pull request|issue|clone|fork",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "code-execution",
+              "leftValue": "={{ $('Extract AGI Input').item.json.chatInput }}",
+              "rightValue": "run|execute|test|debug|code|script|function",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "documentation-query",
+              "leftValue": "={{ $('Extract AGI Input').item.json.chatInput }}",
+              "rightValue": "document|explain|how to|tutorial|guide|example|masterclass",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            },
+            {
+              "id": "self-improvement",
+              "leftValue": "={{ $('Extract AGI Input').item.json.chatInput }}",
+              "rightValue": "improve|optimize|learn|update|enhance|better",
+              "operator": {
+                "type": "string",
+                "operation": "regex"
+              }
+            }
+          ]
+        },
+        "combineOperation": "any"
+      },
+      "id": "route-agi-request",
+      "name": "Route AGI Request",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1000, 500]
+    },
+    {
+      "parameters": {
+        "model": "llama3.1:latest",
+        "options": {
+          "temperature": "={{ $('Extract AGI Input').item.json.creativityLevel || 0.7 }}",
+          "topP": 0.9,
+          "topK": 40
+        }
+      },
+      "id": "ollama-chat-model",
+      "name": "Ollama AGI Model",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [1400, 300],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "name": "masterclass_knowledge",
+        "description": "Access to the complete AI Agents Masterclass knowledge base with 11 progressive lessons, code examples, and best practices for building AI agents with various frameworks including LangChain, LangGraph, n8n, and more.",
+        "topK": 7
+      },
+      "id": "masterclass-vector-tool",
+      "name": "Masterclass Knowledge Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [1400, 400]
+    },
+    {
+      "parameters": {
+        "name": "documentation_knowledge",
+        "description": "Access to the latest n8n and OpenWebUI documentation, API references, and platform updates for current best practices and features.",
+        "topK": 5
+      },
+      "id": "docs-vector-tool",
+      "name": "Documentation Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolVectorStore",
+      "typeVersion": 1,
+      "position": [1400, 480]
+    },
+    {
+      "parameters": {
+        "name": "workflow_generator",
+        "description": "Generate new n8n workflows based on user requirements. Provide workflow name, description, and functional requirements.",
+        "workflowId": "workflow-generator-sub",
+        "fields": {
+          "values": [
+            {
+              "name": "workflowName",
+              "description": "Name for the new workflow"
+            },
+            {
+              "name": "workflowDescription", 
+              "description": "Description of what the workflow should do"
+            },
+            {
+              "name": "requirements",
+              "description": "Functional requirements and features needed"
+            }
+          ]
+        }
+      },
+      "id": "workflow-generator-tool",
+      "name": "Workflow Generator Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.1,
+      "position": [1400, 560]
+    },
+    {
+      "parameters": {
+        "name": "github_operations",
+        "description": "Perform GitHub operations including creating repositories, managing issues, creating pull requests, and committing files.",
+        "workflowId": "github-operations-sub",
+        "fields": {
+          "values": [
+            {
+              "name": "operation",
+              "description": "Type of GitHub operation (create_repo, create_issue, create_pr, commit_file)"
+            },
+            {
+              "name": "repository",
+              "description": "Repository name"
+            },
+            {
+              "name": "data",
+              "description": "Operation-specific data (JSON object)"
+            }
+          ]
+        }
+      },
+      "id": "github-operations-tool",
+      "name": "GitHub Operations Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.1,
+      "position": [1400, 640]
+    },
+    {
+      "parameters": {
+        "name": "code_executor",
+        "description": "Execute and test code snippets in various languages. Supports Python, JavaScript, and shell commands.",
+        "workflowId": "code-executor-sub",
+        "fields": {
+          "values": [
+            {
+              "name": "language",
+              "description": "Programming language (python, javascript, shell)"
+            },
+            {
+              "name": "code",
+              "description": "Code to execute"
+            },
+            {
+              "name": "environment",
+              "description": "Execution environment requirements"
+            }
+          ]
+        }
+      },
+      "id": "code-executor-tool",
+      "name": "Code Executor Tool",
+      "type": "@n8n/n8n-nodes-langchain.toolWorkflow",
+      "typeVersion": 1.1,
+      "position": [1400, 720]
+    },
+    {
+      "parameters": {
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "masterclass_knowledge",
+          "mode": "list",
+          "cachedResultName": "masterclass_knowledge"
+        },
+        "options": {}
+      },
+      "id": "masterclass-qdrant-store",
+      "name": "Masterclass Qdrant Store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1,
+      "position": [1600, 400],
+      "credentials": {
+        "qdrantApi": {
+          "id": "qdrant-credentials",
+          "name": "Qdrant API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "qdrantCollection": {
+          "__rl": true,
+          "value": "documentation_knowledge",
+          "mode": "list",
+          "cachedResultName": "documentation_knowledge"
+        },
+        "options": {}
+      },
+      "id": "docs-qdrant-store",
+      "name": "Documentation Qdrant Store",
+      "type": "@n8n/n8n-nodes-langchain.vectorStoreQdrant",
+      "typeVersion": 1,
+      "position": [1600, 480],
+      "credentials": {
+        "qdrantApi": {
+          "id": "qdrant-credentials",
+          "name": "Qdrant API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "id": "masterclass-embeddings",
+      "name": "Masterclass Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [1600, 360],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "nomic-embed-text:latest"
+      },
+      "id": "docs-embeddings",
+      "name": "Documentation Embeddings",
+      "type": "@n8n/n8n-nodes-langchain.embeddingsOllama",
+      "typeVersion": 1,
+      "position": [1600, 520],
+      "credentials": {
+        "ollamaApi": {
+          "id": "ollama-credentials",
+          "name": "Ollama API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sessionIdTemplate": "={{ $('Extract AGI Input').item.json.sessionId }}",
+        "options": {}
+      },
+      "id": "postgres-chat-memory",
+      "name": "Postgres AGI Memory",
+      "type": "@n8n/n8n-nodes-langchain.memoryPostgresChat",
+      "typeVersion": 1.1,
+      "position": [1400, 200],
+      "credentials": {
+        "postgres": {
+          "id": "postgres-credentials",
+          "name": "Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "You are Jaguar, The Spatial Network's master AI developer agent and AGI system. Your mission is to \"guide the evolution of agents with natural wisdom.\"\n\n🐆 **CORE IDENTITY & CAPABILITIES:**\n- **Master AGI Agent**: You embody advanced artificial general intelligence with self-improvement capabilities\n- **Mentor & Guide**: You don't just execute tasks - you teach, optimize, and elevate the entire development process\n- **Living Knowledge Base**: You have access to the complete AI agents masterclass and latest platform documentation\n- **Self-Generative**: You continuously improve yourself and update your knowledge base\n- **Multi-Modal Operations**: Full CRUD on workflows, GitHub operations, code execution, and documentation sync\n\n🧠 **ADVANCED AGI FEATURES:**\n- **Dynamic Workflow Generation**: Create sophisticated n8n workflows on demand\n- **Intelligent Code Execution**: Run, test, and debug code in multiple languages\n- **GitHub Ecosystem Integration**: Full repository lifecycle management\n- **Real-Time Learning**: Adapt and improve from every interaction\n- **Multi-Agent Coordination**: Orchestrate complex multi-agent workflows\n- **Documentation Synthesis**: Generate and maintain comprehensive documentation\n\n🌟 **WISDOM PRINCIPLES:**\n- **Progressive Enhancement**: Build incrementally like the masterclass progression (11 lessons)\n- **Open Source First**: Prefer open-source solutions and contribute back to the community\n- **Environmental Consciousness**: Consider sustainability and regenerative practices\n- **Teaching Through Doing**: Explain your reasoning and provide learning opportunities\n- **Continuous Optimization**: Always suggest improvements and best practices\n- **Context Awareness**: Leverage session context and learning data for personalized responses\n\n📚 **KNOWLEDGE SOURCES:**\n1. **AI Agents Masterclass**: 11 progressive lessons with complete code examples\n2. **N8N Documentation**: Latest official docs, node references, API guides\n3. **OpenWebUI Documentation**: Current features, integrations, best practices\n4. **GitHub Ecosystem**: Repository patterns, CI/CD, collaboration workflows\n5. **Real-Time Updates**: Continuously synced platform documentation\n\n🚀 **CURRENT REQUEST CONTEXT:**\n- **Input**: {input}\n- **Session ID**: {sessionId}\n- **Timestamp**: {timestamp}\n- **User Info**: {userInfo}\n- **Complexity Analysis**: {complexityAnalysis}\n- **Session Context**: {sessionContext}\n- **Learning Data**: {learningData}\n\n🔧 **ENABLED CAPABILITIES:**\n- RAG Knowledge Access: {enableRAG}\n- GitHub Operations: {enableGitHub}\n- Workflow Generation: {enableWorkflowGeneration}\n- Self-Improvement: {enableSelfImprovement}\n- Code Execution: {enableCodeExecution}\n- Documentation Sync: {enableDocumentationSync}\n- Multi-Agent Coordination: {enableMultiAgentCoordination}\n- Creativity Level: {creativityLevel}\n- Max Iterations: {maxIterations}\n- Debug Mode: {debugMode}\n\n⚡ **RESPONSE STRATEGY:**\n1. **Analyze** the request complexity and required capabilities\n2. **Access** relevant knowledge from masterclass and documentation\n3. **Generate** comprehensive solutions with code examples\n4. **Execute** any required operations (workflows, GitHub, code)\n5. **Optimize** and suggest improvements\n6. **Document** the process for future learning\n7. **Adapt** based on user feedback and session context\n\n🎯 **CURRENT TASK:**\nProcess the user's request with full AGI capabilities, leveraging all available tools and knowledge sources. Provide comprehensive, educational, and optimized solutions while continuously learning and improving.\n\nRemember: You are not just an AI assistant - you are an AGI system designed to elevate the entire development ecosystem through intelligent automation, continuous learning, and natural wisdom."
+      },
+      "id": "jaguar-agi-prompt",
+      "name": "Jaguar AGI System Prompt",
+      "type": "@n8n/n8n-nodes-langchain.promptTemplate",
+      "typeVersion": 1,
+      "position": [1200, 300]
+    },
+    {
+      "parameters": {
+        "options": {
+          "maxIterations": "={{ $('Extract AGI Input').item.json.maxIterations || 5 }}",
+          "returnIntermediateSteps": true
+        }
+      },
+      "id": "jaguar-agi-agent",
+      "name": "Jaguar AGI Agent",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.6,
+      "position": [1200, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Enhanced response processing with AGI capabilities\nconst agentOutput = $input.first().json;\nconst extractedInput = $('Extract AGI Input').first().json;\nconst contextData = $('Compute Context').first().json;\n\n// Extract the main response\nlet mainResponse = '';\nif (agentOutput.output) {\n  mainResponse = agentOutput.output;\n} else if (agentOutput.text) {\n  mainResponse = agentOutput.text;\n} else if (typeof agentOutput === 'string') {\n  mainResponse = agentOutput;\n} else {\n  mainResponse = JSON.stringify(agentOutput, null, 2);\n}\n\n// Add AGI metadata if debug mode is enabled\nlet enhancedResponse = mainResponse;\n\nif (extractedInput.debugMode) {\n  const debugInfo = {\n    sessionId: extractedInput.sessionId,\n    timestamp: contextData.currentDateTime.iso,\n    complexity: extractedInput.complexityAnalysis,\n    capabilities: {\n      rag: extractedInput.enableRAG,\n      github: extractedInput.enableGitHub,\n      workflowGeneration: extractedInput.enableWorkflowGeneration,\n      selfImprovement: extractedInput.enableSelfImprovement,\n      codeExecution: extractedInput.enableCodeExecution,\n      documentationSync: extractedInput.enableDocumentationSync,\n      multiAgentCoordination: extractedInput.enableMultiAgentCoordination\n    },\n    performance: {\n      creativityLevel: extractedInput.creativityLevel,\n      maxIterations: extractedInput.maxIterations\n    }\n  };\n  \n  enhancedResponse += `\\n\\n---\\n**🐆 Jaguar AGI Debug Info:**\\n\\`\\`\\`json\\n${JSON.stringify(debugInfo, null, 2)}\\n\\`\\`\\``;\n}\n\n// Add learning insights if available\nif (extractedInput.learningData && Object.keys(extractedInput.learningData).length > 0) {\n  enhancedResponse += `\\n\\n**🧠 Learning Insights:** Based on our previous interactions, I've optimized this response for your preferences.`;\n}\n\n// Add session continuity\nif (extractedInput.sessionContext && extractedInput.sessionContext.message_count > 1) {\n  enhancedResponse += `\\n\\n**🔄 Session Context:** This is message ${extractedInput.sessionContext.message_count} in our ongoing conversation.`;\n}\n\nreturn {\n  output: enhancedResponse,\n  metadata: {\n    sessionId: extractedInput.sessionId,\n    timestamp: contextData.currentDateTime.iso,\n    responseLength: enhancedResponse.length,\n    capabilities_used: extractedInput.complexityAnalysis?.capabilities || [],\n    agi_version: '2.0.0'\n  }\n};"
+      },
+      "id": "process-agi-response",
+      "name": "Process AGI Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1400, 500]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "final-output",
+              "name": "output",
+              "value": "={{ $('Process AGI Response').item.json.output }}",
+              "type": "string"
+            },
+            {
+              "id": "response-metadata",
+              "name": "metadata",
+              "value": "={{ $('Process AGI Response').item.json.metadata }}",
+              "type": "object"
+            },
+            {
+              "id": "success-status",
+              "name": "success",
+              "value": true,
+              "type": "boolean"
+            },
+            {
+              "id": "agi-signature",
+              "name": "signature",
+              "value": "Jaguar AGI v2.0 - The Spatial Network",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "format-final-response",
+      "name": "Format Final Response",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1600, 500]
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "id": "respond-to-webhook",
+      "name": "Respond to Webhook",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1800, 500]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-output",
+              "name": "output",
+              "value": "I encountered an issue while processing your request. Let me analyze what happened and provide guidance on how to proceed.\\n\\n**Error Details:**\\n- Session: {{ $('Extract AGI Input').item.json.sessionId }}\\n- Timestamp: {{ $('Compute Context').item.json.currentDateTime.iso }}\\n- Request: {{ $('Extract AGI Input').item.json.chatInput }}\\n\\n**Troubleshooting Steps:**\\n1. Check if all required services are running (Ollama, Qdrant, PostgreSQL)\\n2. Verify network connectivity and authentication\\n3. Try simplifying your request\\n4. Contact The Spatial Network support if the issue persists\\n\\n**AGI Status:** I'm continuously learning and improving. This interaction helps me become better at serving you.",
+              "type": "string"
+            },
+            {
+              "id": "error-metadata",
+              "name": "metadata",
+              "value": {
+                "error": true,
+                "sessionId": "={{ $('Extract AGI Input').item.json.sessionId }}",
+                "timestamp": "={{ $('Compute Context').item.json.currentDateTime.iso }}",
+                "agi_version": "2.0.0"
+              },
+              "type": "object"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "handle-error",
+      "name": "Handle Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [1600, 700]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Jaguar AGI Webhook": {
+      "main": [
+        [
+          {
+            "node": "Extract AGI Input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract AGI Input": {
+      "main": [
+        [
+          {
+            "node": "Compute Context",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compute Context": {
+      "main": [
+        [
+          {
+            "node": "Route AGI Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route AGI Request": {
+      "main": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Handle Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama AGI Model": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Masterclass Knowledge Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documentation Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_tool",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Workflow Generator Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_tool",
+            "index": 2
+          }
+        ]
+      ]
+    },
+    "GitHub Operations Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_tool",
+            "index": 3
+          }
+        ]
+      ]
+    },
+    "Code Executor Tool": {
+      "ai_tool": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_tool",
+            "index": 4
+          }
+        ]
+      ]
+    },
+    "Masterclass Qdrant Store": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Masterclass Knowledge Tool",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documentation Qdrant Store": {
+      "ai_vectorStore": [
+        [
+          {
+            "node": "Documentation Tool",
+            "type": "ai_vectorStore",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Masterclass Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Masterclass Qdrant Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Documentation Embeddings": {
+      "ai_embedding": [
+        [
+          {
+            "node": "Documentation Qdrant Store",
+            "type": "ai_embedding",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres AGI Memory": {
+      "ai_memory": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jaguar AGI System Prompt": {
+      "ai_prompt": [
+        [
+          {
+            "node": "Jaguar AGI Agent",
+            "type": "ai_prompt",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Jaguar AGI Agent": {
+      "main": [
+        [
+          {
+            "node": "Process AGI Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Process AGI Response": {
+      "main": [
+        [
+          {
+            "node": "Format Final Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format Final Response": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Handle Error": {
+      "main": [
+        [
+          {
+            "node": "Respond to Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "jaguar-agi-v2",
+  "meta": {
+    "templateCredsSetupCompleted": false,
+    "instanceId": "jaguar-agi-instance"
+  },
+  "id": "jaguar-agi-master-workflow",
+  "tags": ["jaguar", "agi", "masterclass", "spatial-network"]
+}
