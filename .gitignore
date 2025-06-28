@@ -2,6 +2,7 @@ __pycache__
 prep
 .env
 .env.local
+.env.prod
 chroma_db
 test.py
 data
@@ -13,3 +14,28 @@ node_modules
 venv
 venv2
 *.db
+
+# Deployment and Security Files
+deployment-credentials.txt
+*.pem
+*.key
+id_rsa*
+github_actions_key*
+.ssh/
+ssh_keys/
+
+# Production Environment Files
+jaguar-local/production/.env.prod
+jaguar-local/.env.prod
+
+# Backup and Log Files
+*.log
+*.backup
+backup/
+logs/
+
+# Temporary Files
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db

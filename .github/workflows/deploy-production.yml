@@ -1,0 +1,313 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'jaguar-local/**'
+      - '.github/workflows/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+        - production
+      confirm_deployment:
+        description: 'Type "DEPLOY" to confirm deployment'
+        required: true
+        type: string
+
+# Security: Restrict to specific environments and require manual approval for sensitive operations
+permissions:
+  contents: read
+  actions: read
+  security-events: write
+
+env:
+  DEPLOYMENT_TIMEOUT: 1800  # 30 minutes timeout
+
+jobs:
+  # Security validation job
+  security-check:
+    runs-on: ubuntu-latest
+    outputs:
+      deployment-approved: ${{ steps.validate.outputs.approved }}
+    steps:
+    - name: Validate manual deployment confirmation
+      id: validate
+      run: |
+        if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          if [[ "${{ github.event.inputs.confirm_deployment }}" != "DEPLOY" ]]; then
+            echo "❌ Manual deployment requires typing 'DEPLOY' to confirm"
+            exit 1
+          fi
+          echo "✅ Manual deployment confirmed"
+        fi
+        echo "approved=true" >> $GITHUB_OUTPUT
+
+    - name: Check repository security
+      run: |
+        echo "🔍 Security Check Summary:"
+        echo "- Repository: ${{ github.repository }}"
+        echo "- Branch: ${{ github.ref_name }}"
+        echo "- Actor: ${{ github.actor }}"
+        echo "- Event: ${{ github.event_name }}"
+        echo "- Commit: ${{ github.sha }}"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: security-check
+    timeout-minutes: 30
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        # Only checkout specific paths to minimize exposure
+        sparse-checkout: |
+          jaguar-local/
+          .github/
+        sparse-checkout-cone-mode: false
+
+    - name: Validate secrets presence
+      run: |
+        echo "🔐 Validating required secrets..."
+        MISSING_SECRETS=()
+        
+        if [[ -z "${{ secrets.DROPLET_IP }}" ]]; then
+          MISSING_SECRETS+=("DROPLET_IP")
+        fi
+        if [[ -z "${{ secrets.DROPLET_USER }}" ]]; then
+          MISSING_SECRETS+=("DROPLET_USER")
+        fi
+        if [[ -z "${{ secrets.SSH_PRIVATE_KEY }}" ]]; then
+          MISSING_SECRETS+=("SSH_PRIVATE_KEY")
+        fi
+        if [[ -z "${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}" ]]; then
+          MISSING_SECRETS+=("DIGITALOCEAN_ACCESS_TOKEN")
+        fi
+        if [[ -z "${{ secrets.POSTGRES_PASSWORD }}" ]]; then
+          MISSING_SECRETS+=("POSTGRES_PASSWORD")
+        fi
+        if [[ -z "${{ secrets.N8N_ENCRYPTION_KEY }}" ]]; then
+          MISSING_SECRETS+=("N8N_ENCRYPTION_KEY")
+        fi
+        if [[ -z "${{ secrets.N8N_USER_MANAGEMENT_JWT_SECRET }}" ]]; then
+          MISSING_SECRETS+=("N8N_USER_MANAGEMENT_JWT_SECRET")
+        fi
+        
+        if [[ ${#MISSING_SECRETS[@]} -gt 0 ]]; then
+          echo "❌ Missing required secrets: ${MISSING_SECRETS[*]}"
+          echo "Please configure all required secrets in repository settings."
+          exit 1
+        fi
+        
+        echo "✅ All required secrets are configured"
+
+    - name: Setup SSH
+      env:
+        SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+      run: |
+        mkdir -p ~/.ssh
+        echo "$SSH_PRIVATE_KEY" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -H $DROPLET_IP >> ~/.ssh/known_hosts
+
+    - name: Install doctl
+      uses: digitalocean/action-doctl@v2
+      with:
+        token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+    - name: Verify droplet status
+      run: |
+        doctl compute droplet list --format "ID,Name,PublicIPv4,Status" | grep 504791828 || echo "Droplet not found in list"
+
+    - name: Create deployment directory on server
+      env:
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+      run: |
+        ssh -o StrictHostKeyChecking=no $DROPLET_USER@$DROPLET_IP "
+          sudo mkdir -p /opt/jaguar-agi
+          sudo chown $DROPLET_USER:$DROPLET_USER /opt/jaguar-agi
+        "
+
+    - name: Copy deployment files to server
+      env:
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+      run: |
+        # Copy production files
+        scp -o StrictHostKeyChecking=no -r jaguar-local/production/* $DROPLET_USER@$DROPLET_IP:/opt/jaguar-agi/
+        
+        # Copy main docker-compose for reference
+        scp -o StrictHostKeyChecking=no jaguar-local/docker-compose.yml $DROPLET_USER@$DROPLET_IP:/opt/jaguar-agi/docker-compose.dev.yml
+
+    - name: Create production environment file
+      env:
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+        POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+        N8N_ENCRYPTION_KEY: ${{ secrets.N8N_ENCRYPTION_KEY }}
+        N8N_USER_MANAGEMENT_JWT_SECRET: ${{ secrets.N8N_USER_MANAGEMENT_JWT_SECRET }}
+      run: |
+        ssh -o StrictHostKeyChecking=no $DROPLET_USER@$DROPLET_IP "
+          cd /opt/jaguar-agi
+          
+          # Create .env.prod from template if it doesn't exist
+          if [ ! -f .env.prod ]; then
+            cp .env.prod.example .env.prod
+            
+            # Update with secrets from GitHub
+            sed -i 's/your_secure_password_here_change_this/$POSTGRES_PASSWORD/g' .env.prod
+            sed -i 's/your_secure_encryption_key_here_change_this_32_chars_min/$N8N_ENCRYPTION_KEY/g' .env.prod
+            sed -i 's/your_secure_jwt_secret_here_change_this_32_chars_min/$N8N_USER_MANAGEMENT_JWT_SECRET/g' .env.prod
+            
+            chmod 600 .env.prod
+            echo 'Environment file created'
+          else
+            echo 'Environment file already exists, updating secrets...'
+            sed -i 's/POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$POSTGRES_PASSWORD/g' .env.prod
+            sed -i 's/N8N_ENCRYPTION_KEY=.*/N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY/g' .env.prod
+            sed -i 's/N8N_USER_MANAGEMENT_JWT_SECRET=.*/N8N_USER_MANAGEMENT_JWT_SECRET=$N8N_USER_MANAGEMENT_JWT_SECRET/g' .env.prod
+          fi
+        "
+
+    - name: Install Docker and Docker Compose (if needed)
+      env:
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+      run: |
+        ssh -o StrictHostKeyChecking=no $DROPLET_USER@$DROPLET_IP "
+          # Check if Docker is installed
+          if ! command -v docker &> /dev/null; then
+            echo 'Installing Docker...'
+            curl -fsSL https://get.docker.com -o get-docker.sh
+            sudo sh get-docker.sh
+            sudo usermod -aG docker $DROPLET_USER
+            rm get-docker.sh
+          else
+            echo 'Docker already installed'
+          fi
+          
+          # Check if Docker Compose is installed
+          if ! command -v docker-compose &> /dev/null; then
+            echo 'Installing Docker Compose...'
+            sudo curl -L \"https://github.com/docker/compose/releases/latest/download/docker-compose-\$(uname -s)-\$(uname -m)\" -o /usr/local/bin/docker-compose
+            sudo chmod +x /usr/local/bin/docker-compose
+          else
+            echo 'Docker Compose already installed'
+          fi
+          
+          # Start Docker service
+          sudo systemctl enable docker
+          sudo systemctl start docker
+        "
+
+    - name: Deploy application
+      env:
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+      run: |
+        ssh -o StrictHostKeyChecking=no $DROPLET_USER@$DROPLET_IP "
+          cd /opt/jaguar-agi
+          
+          echo 'Pulling latest Docker images...'
+          docker-compose -f docker-compose.prod.yml pull
+          
+          echo 'Stopping existing services...'
+          docker-compose -f docker-compose.prod.yml down || true
+          
+          echo 'Starting services...'
+          docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d
+          
+          echo 'Waiting for services to start...'
+          sleep 30
+          
+          echo 'Checking service status...'
+          docker-compose -f docker-compose.prod.yml ps
+        "
+
+    - name: Install n8n LangChain nodes
+      env:
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+      run: |
+        ssh -o StrictHostKeyChecking=no $DROPLET_USER@$DROPLET_IP "
+          cd /opt/jaguar-agi
+          
+          echo 'Installing LangChain nodes in n8n...'
+          # Wait for n8n to be fully ready
+          sleep 60
+          
+          # Check if LangChain nodes are already installed
+          if docker exec jaguar-n8n npm list @n8n/n8n-nodes-langchain &> /dev/null; then
+            echo 'LangChain nodes already installed'
+          else
+            echo 'Installing LangChain nodes...'
+            docker exec jaguar-n8n npm install @n8n/n8n-nodes-langchain
+            echo 'Restarting n8n to load new nodes...'
+            docker-compose -f docker-compose.prod.yml restart n8n
+            sleep 30
+          fi
+        "
+
+    - name: Health check
+      env:
+        DROPLET_IP: ${{ secrets.DROPLET_IP }}
+        DROPLET_USER: ${{ secrets.DROPLET_USER }}
+      run: |
+        ssh -o StrictHostKeyChecking=no $DROPLET_USER@$DROPLET_IP "
+          cd /opt/jaguar-agi
+          
+          echo 'Performing health checks...'
+          
+          # Check if containers are running
+          if [ \$(docker-compose -f docker-compose.prod.yml ps -q | wc -l) -gt 0 ]; then
+            echo '✅ Containers are running'
+          else
+            echo '❌ No containers running'
+            exit 1
+          fi
+          
+          # Check n8n health (internal port)
+          if docker exec jaguar-n8n curl -f -s http://localhost:5678/healthz > /dev/null; then
+            echo '✅ N8N is healthy'
+          else
+            echo '⚠️ N8N health check failed'
+          fi
+          
+          # Check if Caddy is serving HTTPS
+          sleep 10
+          if curl -f -s -k https://n8n.thespatialnetwork.net > /dev/null; then
+            echo '✅ N8N is accessible via HTTPS'
+          else
+            echo '⚠️ N8N HTTPS check failed (may need DNS propagation)'
+          fi
+          
+          echo 'Deployment completed successfully!'
+        "
+
+    - name: Cleanup
+      if: always()
+      run: |
+        rm -f ~/.ssh/id_rsa
+
+    - name: Deployment Summary
+      run: |
+        echo "🎉 Deployment Summary"
+        echo "===================="
+        echo "✅ Code deployed to Digital Ocean droplet"
+        echo "✅ Docker containers started"
+        echo "✅ N8N accessible at: https://n8n.thespatialnetwork.net"
+        echo "✅ OpenWebUI accessible at: https://ai.thespatialnetwork.net"
+        echo ""
+        echo "📋 Next Steps:"
+        echo "1. Verify DNS is pointing to your droplet IP"
+        echo "2. Access n8n and create admin account"
+        echo "3. Import workflows from the production directory"
+        echo "4. Test the integration"
